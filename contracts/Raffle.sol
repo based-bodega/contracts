@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "hardhat/console.sol";
 
 contract Raffle is Ownable {
     IERC20 public token;  // ERC-20 token used for buying tickets
@@ -10,7 +11,7 @@ contract Raffle is Ownable {
     uint256 public startTime;
     uint256 public endTime;
     address[] public participants;
-    bool public raffleDrawn = false;    
+    bool public raffleDrawn = false;
     address public winner;
 
     event TicketPurchased(address indexed participant, uint256 ticketsBought);
@@ -71,10 +72,45 @@ contract Raffle is Ownable {
         winner = participants[randomIndex];
         raffleDrawn = true;
 
+        console.log("Selected winner", winner, randomIndex);
         emit RaffleDrawn(winner, randomIndex);
     }
 
     function getParticipants() external view returns (address[] memory) {
         return participants;
+    }
+
+    function getRaffleStatus() external view returns (bool, bool, bool) {
+        bool isOngoing = block.timestamp >= startTime && block.timestamp <= endTime;
+        bool hasEnded = block.timestamp > endTime;
+        bool isDrawn = raffleDrawn;
+        return (isOngoing, hasEnded, isDrawn);
+    }
+
+    function getWinner() external view returns (address) {
+        require(raffleDrawn, "Raffle: Winner not drawn yet");
+        return winner;
+    }
+
+    function getRemainingTime() external view returns (uint256) {
+        require(block.timestamp < endTime, "Raffle: Raffle has ended");
+        return endTime - block.timestamp;
+    }
+
+    function getTicketPrice() external view returns (uint256) {
+        return ticketPrice;
+    }
+
+    function getTokenBalance() external view returns (uint256) {
+        return token.balanceOf(address(this));
+    }
+
+    function hasParticipated(address participant) external view returns (bool) {
+        for (uint256 i = 0; i < participants.length; i++) {
+            if (participants[i] == participant) {
+                return true;
+            }
+        }
+        return false;
     }
 }
