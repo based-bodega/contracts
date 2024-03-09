@@ -6,6 +6,6 @@ module.exports = {
     84532: "0xe5246fcF5D6FA6355bdF19F82a631349b08bfce3",
   },
   stake: {
-    84532: "0xe5246fcF5D6FA6355bdF19F82a631349b08bfce3",
+    84532: "0x0102630a0e681fb025cb53bdfc9d455c2b3a5310",
   },
 };
