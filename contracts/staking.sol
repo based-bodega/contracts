@@ -33,23 +33,31 @@ contract StakingContract is ERC721Holder {
     }
 
     modifier onlyStaker() {
-        require(stakedNFTs.contains(uint256(msg.sender)), "Not a staker");
+        require(stakedNFTs[msg.sender].length() > 0, "Not a staker");
         _;
     }
 
     function stake(uint256 _nftId, uint256 _collectionId) external {
-        require(!stakedNFTs.contains(_nftId), "NFT already staked");
+        require(!stakedNFTs[msg.sender].contains(_nftId), "NFT already staked");
 
         // Transfer NFT to this contract
         IERC721(msg.sender).safeTransferFrom(msg.sender, address(this), _nftId);
 
-        stakedNFTs.add(_nftId);
+        stakedNFTs[msg.sender].add(_nftId);
 
         stakingInfo[msg.sender] = StakingInfo(block.timestamp, _nftId, 0, _collectionId);
 
         emit Staked(msg.sender, _nftId, _collectionId);
     }
+
+    function stakeAll(uint256[] calldata _nftIds, uint256[] calldata _collectionIds) external {
+        require(_nftIds.length == _collectionIds.length, "Array length mismatch");
         
+        for (uint256 i = 0; i < _nftIds.length; i++) {
+            this.stake(_nftIds[i], _collectionIds[i]);
+        }
+    }
+
     function unstake() external onlyStaker {
         StakingInfo storage info = stakingInfo[msg.sender];
         require(info.startTime.add(DURATION) <= block.timestamp, "Cannot unstake yet");
@@ -61,12 +69,40 @@ contract StakingContract is ERC721Holder {
         projectToken.transfer(msg.sender, tokensEarned);
 
         // Remove NFT from staked list
-        stakedNFTs.remove(info.nftId);
+        stakedNFTs[msg.sender].remove(info.nftId);
 
         // Reset staking information
         delete stakingInfo[msg.sender];
 
         emit Unstaked(msg.sender, info.nftId, tokensEarned);
+    }
+
+    function unstakeAll() external onlyStaker {
+        EnumerableSet.UintSet storage nftIds = stakedNFTs[msg.sender];
+        uint256[] memory userNftIds = nftIds.values();
+        
+        for (uint256 i = 0; i < userNftIds.length; i++) {
+            unstakeSingle(userNftIds[i]);
+        }
+    }
+
+    function unstakeSingle(uint256 _nftId) private {
+        StakingInfo storage info = stakingInfo[msg.sender];
+        require(info.startTime.add(DURATION) <= block.timestamp, "Cannot unstake yet");
+
+        // Calculate tokens earned based on the daily yield
+        uint256 tokensEarned = (block.timestamp.sub(info.startTime).div(DURATION)).mul(getRewardForCollection(info.collectionId));
+
+        // Transfer earned tokens to the user
+        projectToken.transfer(msg.sender, tokensEarned);
+
+        // Remove NFT from staked list
+        stakedNFTs[msg.sender].remove(_nftId);
+
+        // Reset staking information
+        delete stakingInfo[msg.sender];
+
+        emit Unstaked(msg.sender, _nftId, tokensEarned);
     }
 
     function getBalance(address _user) external view returns (uint256) {
@@ -91,7 +127,7 @@ contract StakingContract is ERC721Holder {
         return stakingInfo[_user].tokensEarned;
     }
 
-    function getRewardForCollection(uint256 _collectionId) internal view returns (uint256) {
+    function getRewardForCollection(uint256 _collectionId) internal pure returns (uint256) {
         // Define your logic for determining the daily reward based on the collection
         // For example, return 10 tokens for Collection 1 (NFT A) and 1 token for Collection 2 (NFT B)
         if (_collectionId == 1) {

@@ -10,6 +10,8 @@ contract Raffle is Ownable {
     uint256 public ticketPrice;
     uint256 public startTime;
     uint256 public endTime;
+    string public name;
+    string public imageUri;
     address[] public participants;
     bool public raffleDrawn = false;
     address public winner;
@@ -37,12 +39,16 @@ contract Raffle is Ownable {
         uint256 _ticketPrice,
         uint256 _startTime,
         uint256 _endTime,
-        address _initialOwner
+        address _initialOwner,
+        string memory _name,
+        string memory _imageUri
     ) Ownable(_initialOwner) {
         token = IERC20(_tokenAddress);
         ticketPrice = _ticketPrice;
         startTime = _startTime;
         endTime = _endTime;
+        name = _name;
+        imageUri = _imageUri;
     }
 
     function buyTickets(uint256 _numTickets) external onlyDuringRafflePeriod {

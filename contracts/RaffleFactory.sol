@@ -10,9 +10,9 @@ contract ContractFactory is Ownable, ReentrancyGuard  {
 
     constructor() Ownable(msg.sender) {}
 
-    function createContract(address tokenAddress, uint256 _ticketPrice, uint256 _startTime, uint256 _endTime) public onlyOwner {
+    function createContract(address tokenAddress, uint256 _ticketPrice, uint256 _startTime, uint256 _endTime, string memory name, string memory imageUri) public onlyOwner {
         // Create a new instance of the Raffle contract
-        Raffle newContract = new Raffle(tokenAddress, _ticketPrice, _startTime, _endTime, msg.sender);
+        Raffle newContract = new Raffle(tokenAddress, _ticketPrice, _startTime, _endTime, msg.sender, name, imageUri);
 
         // Save the address of the deployed contract
         deployedContracts.push(address(newContract));
