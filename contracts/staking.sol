@@ -45,14 +45,25 @@ contract StakingContract is ERC721Holder {
 
         stakedNFTs[msg.sender].add(_nftId);
 
-        stakingInfo[msg.sender] = StakingInfo(block.timestamp, _nftId, 0, _collectionId);
+        stakingInfo[msg.sender] = StakingInfo(
+            block.timestamp,
+            _nftId,
+            0,
+            _collectionId
+        );
 
         emit Staked(msg.sender, _nftId, _collectionId);
     }
 
-    function stakeAll(uint256[] calldata _nftIds, uint256[] calldata _collectionIds) external {
-        require(_nftIds.length == _collectionIds.length, "Array length mismatch");
-        
+    function stakeAll(
+        uint256[] calldata _nftIds,
+        uint256[] calldata _collectionIds
+    ) external {
+        require(
+            _nftIds.length == _collectionIds.length,
+            "Array length mismatch"
+        );
+
         for (uint256 i = 0; i < _nftIds.length; i++) {
             this.stake(_nftIds[i], _collectionIds[i]);
         }
@@ -60,10 +71,15 @@ contract StakingContract is ERC721Holder {
 
     function unstake() external onlyStaker {
         StakingInfo storage info = stakingInfo[msg.sender];
-        require(info.startTime.add(DURATION) <= block.timestamp, "Cannot unstake yet");
+        require(
+            info.startTime.add(DURATION) <= block.timestamp,
+            "Cannot unstake yet"
+        );
 
         // Calculate tokens earned based on the daily yield
-        uint256 tokensEarned = (block.timestamp.sub(info.startTime).div(DURATION)).mul(getRewardForCollection(info.collectionId));
+        uint256 tokensEarned = (
+            block.timestamp.sub(info.startTime).div(DURATION)
+        ).mul(getRewardForCollection(info.collectionId));
 
         // Transfer earned tokens to the user
         projectToken.transfer(msg.sender, tokensEarned);
@@ -77,21 +93,29 @@ contract StakingContract is ERC721Holder {
         emit Unstaked(msg.sender, info.nftId, tokensEarned);
     }
 
-    function unstakeAll() external onlyStaker {
+     function unstakeAll(uint256 _collectionId) external onlyStaker {
         EnumerableSet.UintSet storage nftIds = stakedNFTs[msg.sender];
-        uint256[] memory userNftIds = nftIds.values();
         
-        for (uint256 i = 0; i < userNftIds.length; i++) {
-            unstakeSingle(userNftIds[i]);
+        for (uint256 i = 0; i < nftIds.length(); i++) {
+            uint256 nftId = nftIds.at(i);
+            if (stakingInfo[msg.sender].collectionId == _collectionId) {
+                unstakeSingle(nftId);
+            }
         }
     }
 
+
     function unstakeSingle(uint256 _nftId) private {
         StakingInfo storage info = stakingInfo[msg.sender];
-        require(info.startTime.add(DURATION) <= block.timestamp, "Cannot unstake yet");
+        require(
+            info.startTime.add(DURATION) <= block.timestamp,
+            "Cannot unstake yet"
+        );
 
         // Calculate tokens earned based on the daily yield
-        uint256 tokensEarned = (block.timestamp.sub(info.startTime).div(DURATION)).mul(getRewardForCollection(info.collectionId));
+        uint256 tokensEarned = (
+            block.timestamp.sub(info.startTime).div(DURATION)
+        ).mul(getRewardForCollection(info.collectionId));
 
         // Transfer earned tokens to the user
         projectToken.transfer(msg.sender, tokensEarned);
@@ -109,25 +133,46 @@ contract StakingContract is ERC721Holder {
         return projectToken.balanceOf(_user);
     }
 
-    function getStakedNFTs(address _user) external view returns (uint256[] memory) {
-        uint256[] memory result = new uint256[](1);
-        result[0] = stakingInfo[_user].nftId;
+    function getStakedNFTs(address _user)
+        external
+        view
+        returns (uint256[] memory)
+    {
+        uint256[] memory result = new uint256[](stakedNFTs[_user].length());
+        for (uint256 i = 0; i < stakedNFTs[_user].length(); i++) {
+            result[i] = stakedNFTs[_user].at(i);
+        }
         return result;
     }
 
-    function getTokensOutstanding(address _user) external view returns (uint256) {
+    function getTokensOutstanding(address _user)
+        external
+        view
+        returns (uint256)
+    {
         StakingInfo storage info = stakingInfo[_user];
         if (info.startTime.add(DURATION) <= block.timestamp) {
-            return (block.timestamp.sub(info.startTime).div(DURATION)).mul(getRewardForCollection(info.collectionId)).sub(info.tokensEarned);
+            return
+                (block.timestamp.sub(info.startTime).div(DURATION))
+                    .mul(getRewardForCollection(info.collectionId))
+                    .sub(info.tokensEarned);
         }
         return 0;
     }
 
-    function getTokensEarnedTotal(address _user) external view returns (uint256) {
+    function getTokensEarnedTotal(address _user)
+        external
+        view
+        returns (uint256)
+    {
         return stakingInfo[_user].tokensEarned;
     }
 
-    function getRewardForCollection(uint256 _collectionId) internal pure returns (uint256) {
+    function getRewardForCollection(uint256 _collectionId)
+        internal
+        pure
+        returns (uint256)
+    {
         // Define your logic for determining the daily reward based on the collection
         // For example, return 10 tokens for Collection 1 (NFT A) and 1 token for Collection 2 (NFT B)
         if (_collectionId == 1) {
