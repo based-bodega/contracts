@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract StakingContract is ERC721Holder {
+contract StakingContract is ERC721Holder, Ownable {
     using SafeMath for uint256;
     using EnumerableSet for EnumerableSet.UintSet;
 
@@ -15,173 +16,166 @@ contract StakingContract is ERC721Holder {
 
     struct StakingInfo {
         uint256 startTime;
-        uint256 nftId;
         uint256 tokensEarned;
-        uint256 collectionId; // Unique identifier for NFT collection (e.g., 1 for NFT A, 2 for NFT B)
     }
 
-    mapping(address => StakingInfo) public stakingInfo;
-    mapping(address => EnumerableSet.UintSet) private stakedNFTs;
+    mapping(address => mapping(address => StakingInfo)) public stakingInfo;
+    mapping(address => mapping(address => EnumerableSet.UintSet))
+        private stakedNFTs;
+    mapping(address => uint256) public rewardRate;
 
     uint256 public constant DURATION = 1 days;
 
-    event Staked(address indexed user, uint256 nftId, uint256 collectionId);
-    event Unstaked(address indexed user, uint256 nftId, uint256 tokensEarned);
+    event Staked(address indexed user, uint256[] nftIds, address nftAddress);
+    event Unstaked(
+        address indexed user,
+        address nftAddress,
+        uint256[] nftIds,
+        uint256 tokensEarned
+    );
 
-    constructor(address _projectToken) {
+    constructor(address _projectToken, address _initialOwner) Ownable(_initialOwner) {
         projectToken = IERC20(_projectToken);
     }
 
-    modifier onlyStaker() {
-        require(stakedNFTs[msg.sender].length() > 0, "Not a staker");
-        _;
-    }
-
-    function stake(uint256 _nftId, uint256 _collectionId) external {
-        require(!stakedNFTs[msg.sender].contains(_nftId), "NFT already staked");
-
-        // Transfer NFT to this contract
-        IERC721(msg.sender).safeTransferFrom(msg.sender, address(this), _nftId);
-
-        stakedNFTs[msg.sender].add(_nftId);
-
-        stakingInfo[msg.sender] = StakingInfo(
-            block.timestamp,
-            _nftId,
-            0,
-            _collectionId
+    function stake(uint256 _nftId, address _nftAddress) private {
+        require(
+            !stakedNFTs[msg.sender][_nftAddress].contains(_nftId),
+            "NFT already staked"
         );
 
-        emit Staked(msg.sender, _nftId, _collectionId);
+        // Transfer NFT to this contract
+        IERC721(_nftAddress).safeTransferFrom(
+            msg.sender,
+            address(this),
+            _nftId
+        );
+
+        stakedNFTs[msg.sender][_nftAddress].add(_nftId);
     }
 
     function stakeAll(
         uint256[] calldata _nftIds,
-        uint256[] calldata _collectionIds
+        address _nftAddress
     ) external {
-        require(
-            _nftIds.length == _collectionIds.length,
-            "Array length mismatch"
-        );
+        require(_nftIds.length > 0, "Incorrect nft ids");
+        StakingInfo storage info = stakingInfo[msg.sender][_nftAddress];
+
+        if (
+            stakedNFTs[msg.sender][_nftAddress].length() > 0 &&
+            info.startTime.add(DURATION) <= block.timestamp
+        ) {
+            uint256 tokensEarned = (block.timestamp.sub(info.startTime))
+                .div(DURATION)
+                .mul(getRewardRate(_nftAddress))
+                .mul(stakedNFTs[msg.sender][_nftAddress].length());
+
+            // Transfer earned tokens to the user
+            projectToken.transfer(msg.sender, tokensEarned);
+            info.startTime = block.timestamp;
+            info.tokensEarned += tokensEarned;
+        } else {
+            info.startTime = block.timestamp;
+            info.tokensEarned = 0;
+        }
 
         for (uint256 i = 0; i < _nftIds.length; i++) {
-            this.stake(_nftIds[i], _collectionIds[i]);
+            stake(_nftIds[i], _nftAddress);
         }
+        emit Staked(msg.sender, _nftIds, _nftAddress);
     }
 
-    function unstake() external onlyStaker {
-        StakingInfo storage info = stakingInfo[msg.sender];
+    function unstake(uint256 _nftId, address _nftAddress) private {
+        // Transfer NFT to user
+        IERC721(_nftAddress).safeTransferFrom(
+            address(this),
+            msg.sender,
+            _nftId
+        );
+
+        // Remove NFT from staked list
+        stakedNFTs[msg.sender][_nftAddress].remove(_nftId);
+    }
+
+    function unstakeAll(address _nftAddress) external {
+        require(
+            stakedNFTs[msg.sender][_nftAddress].length() > 0,
+            "Not a staker"
+        );
+        StakingInfo storage info = stakingInfo[msg.sender][_nftAddress];
         require(
             info.startTime.add(DURATION) <= block.timestamp,
             "Cannot unstake yet"
         );
 
+        uint256[] memory nftIds = stakedNFTs[msg.sender][_nftAddress].values();
+
         // Calculate tokens earned based on the daily yield
-        uint256 tokensEarned = (
-            block.timestamp.sub(info.startTime).div(DURATION)
-        ).mul(getRewardForCollection(info.collectionId));
+        uint256 tokensEarned = (block.timestamp.sub(info.startTime))
+            .div(DURATION)
+            .mul(getRewardRate(_nftAddress))
+            .mul(stakedNFTs[msg.sender][_nftAddress].length());
 
-        // Transfer earned tokens to the user
-        projectToken.transfer(msg.sender, tokensEarned);
-
-        // Remove NFT from staked list
-        stakedNFTs[msg.sender].remove(info.nftId);
-
-        // Reset staking information
-        delete stakingInfo[msg.sender];
-
-        emit Unstaked(msg.sender, info.nftId, tokensEarned);
-    }
-
-     function unstakeAll(uint256 _collectionId) external onlyStaker {
-        EnumerableSet.UintSet storage nftIds = stakedNFTs[msg.sender];
-        
-        for (uint256 i = 0; i < nftIds.length(); i++) {
-            uint256 nftId = nftIds.at(i);
-            if (stakingInfo[msg.sender].collectionId == _collectionId) {
-                unstakeSingle(nftId);
-            }
+        for (uint256 i = 0; i < nftIds.length; i++) {
+            unstake(nftIds[i], _nftAddress);
         }
-    }
-
-
-    function unstakeSingle(uint256 _nftId) private {
-        StakingInfo storage info = stakingInfo[msg.sender];
-        require(
-            info.startTime.add(DURATION) <= block.timestamp,
-            "Cannot unstake yet"
-        );
-
-        // Calculate tokens earned based on the daily yield
-        uint256 tokensEarned = (
-            block.timestamp.sub(info.startTime).div(DURATION)
-        ).mul(getRewardForCollection(info.collectionId));
 
         // Transfer earned tokens to the user
         projectToken.transfer(msg.sender, tokensEarned);
 
-        // Remove NFT from staked list
-        stakedNFTs[msg.sender].remove(_nftId);
+        info.startTime = block.timestamp;
+        info.tokensEarned += tokensEarned;
 
-        // Reset staking information
-        delete stakingInfo[msg.sender];
-
-        emit Unstaked(msg.sender, _nftId, tokensEarned);
+        emit Unstaked(msg.sender, _nftAddress, nftIds, tokensEarned);
     }
 
     function getBalance(address _user) external view returns (uint256) {
         return projectToken.balanceOf(_user);
     }
 
-    function getStakedNFTs(address _user)
-        external
-        view
-        returns (uint256[] memory)
-    {
-        uint256[] memory result = new uint256[](stakedNFTs[_user].length());
-        for (uint256 i = 0; i < stakedNFTs[_user].length(); i++) {
-            result[i] = stakedNFTs[_user].at(i);
-        }
-        return result;
+    function getStakedNFTs(
+        address _user,
+        address _nftAddress
+    ) external view returns (uint256[] memory) {
+        uint256[] memory nftIds = stakedNFTs[_user][_nftAddress].values();
+        return nftIds;
     }
 
-    function getTokensOutstanding(address _user)
-        external
-        view
-        returns (uint256)
-    {
-        StakingInfo storage info = stakingInfo[_user];
+    function getClaimableReward(
+        address _user,
+        address _nftAddress
+    ) external view returns (uint256) {
+        StakingInfo storage info = stakingInfo[_user][_nftAddress];
         if (info.startTime.add(DURATION) <= block.timestamp) {
-            return
-                (block.timestamp.sub(info.startTime).div(DURATION))
-                    .mul(getRewardForCollection(info.collectionId))
-                    .sub(info.tokensEarned);
+            return (
+                (block.timestamp.sub(info.startTime))
+                    .div(DURATION)
+                    .mul(getRewardRate(_nftAddress))
+                    .mul(stakedNFTs[msg.sender][_nftAddress].length())
+            );
         }
         return 0;
     }
 
-    function getTokensEarnedTotal(address _user)
-        external
-        view
-        returns (uint256)
-    {
-        return stakingInfo[_user].tokensEarned;
+    function getTokensEarnedTotal(
+        address _user,
+        address _nftAddress
+    ) external view returns (uint256) {
+        return stakingInfo[_user][_nftAddress].tokensEarned;
     }
 
-    function getRewardForCollection(uint256 _collectionId)
-        internal
-        pure
-        returns (uint256)
-    {
-        // Define your logic for determining the daily reward based on the collection
-        // For example, return 10 tokens for Collection 1 (NFT A) and 1 token for Collection 2 (NFT B)
-        if (_collectionId == 1) {
-            return 10;
-        } else if (_collectionId == 2) {
-            return 1;
-        } else {
-            // Default case, return 0 if collection is not recognized
-            return 0;
-        }
+    function getRewardRate(
+        address _nftAddress
+    ) internal view returns (uint256) {
+        return rewardRate[_nftAddress];
+    }
+
+    // Define your logic for determining the daily reward based on the collection
+    // For example, return 10 tokens for Collection 1 (NFT A) and 1 token for Collection 2 (NFT B)
+    function setRewardRate(
+        address _nftAddress,
+        uint256 _rewardRate
+    ) external onlyOwner {
+        rewardRate[_nftAddress] = _rewardRate;
     }
 }
